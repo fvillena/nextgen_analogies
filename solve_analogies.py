@@ -16,6 +16,7 @@ parser.add_argument('--model', type=str, help='language model to use')
 parser.add_argument('--analogies_file', type=Path, help='path to analogies file')
 parser.add_argument('--results_file', type=Path, help='path to results file')
 parser.add_argument('-k', type=int, help='k most probable words to consider')
+parser.add_argument('--analogy', type=str, help='analogy to solve', default=None)
 args = parser.parse_args()
 
 def preprocess(sentence):
@@ -34,6 +35,8 @@ def accuracy_at_k(true, predicted, k):
     return sum(result)/len(result)
 
 relations = pd.read_csv(args.analogies_file).applymap(preprocess)
+if args.analogy:
+    relations = relations[relations["RELA"] == args.analogy]
 
 analogies = defaultdict(list)
 # iterate for every group in a groupby object
