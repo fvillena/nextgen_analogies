@@ -49,17 +49,43 @@ for name, group in relations.groupby("RELA"):
         answer = row2["STR.1"]
         analogies[name].append({"question": question, "answer": answer})
 
-pipe = pipeline("fill-mask", model=args.model, device=0)
+if "bert" in args.model:
+    pipe = pipeline("fill-mask", model=args.model, device=0)
+elif "llama" in args.model:
+    pipe = pipeline("text-generation", model=args.model, device=0)
+
 
 K = args.k
 results = defaultdict(list)
+def predict_k_words(analogy,K):
+    if "bert" in args.model:
+        predictions = pipe(f"{analogy['question']} <mask>.", top_k=K)
+        predicted_words = [preprocess(prediction["token_str"]) for prediction in predictions if is_word(prediction["token_str"])][:K]
+    elif "llama" in args.model:
+        generated_texts = pipe(
+            analogy['question'], 
+            do_sample=False,
+            return_full_text=False,
+            clean_up_tokenization_spaces=True,
+            max_new_tokens=5,
+            num_beams = K,
+            num_return_sequences = K, 
+        )
+        first_word = lambda x: x.strip().split()[0]
+        words = [first_word(x["generated_text"]) for x in generated_texts]
+        unique_words = []
+        for word in words:
+            if (not word in unique_words) & (is_word(word)):
+                unique_words.append(word)
+        predicted_words = unique_words
+    return predicted_words
+
 for rela, current_analogies in tqdm(analogies.items()):
     for analogy in tqdm(current_analogies, leave=False):
         i = 2
         predicted_words = []
         while len(predicted_words) < K:
-            predictions = pipe(f"{analogy['question']} <mask>.", top_k=i*K)
-            predicted_words = [preprocess(prediction["token_str"]) for prediction in predictions if is_word(prediction["token_str"])][:K]
+            predicted_words = predict_k_words(analogy, K*i)
             i += 1
         results[rela].append(predicted_words)
 
