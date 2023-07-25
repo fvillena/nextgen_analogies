@@ -22,3 +22,14 @@ def accuracy_at_k(true, predicted, k):
         else:
             result.append(0)
     return sum(result)/len(result)
+
+def mrr(true, predicted):
+    result = []
+    for true_word,predicted_words in zip(true,predicted):
+        current_result = 0
+        for predicted_word in predicted_words:
+            if true_word in predicted_word:
+                current_result = 1/(predicted_words.index(predicted_word)+1)
+                break
+        result.append(current_result)
+    return result
