@@ -1,7 +1,7 @@
 #! /opt/conda/bin/python
 # -*- coding: utf-8 -*-
 
-from transformers import pipeline
+from transformers import pipeline, AutoTokenizer
 import pandas as pd
 #import defaultdict module  
 import argparse
@@ -24,12 +24,15 @@ with open(args.analogies_file, "r") as f:
 if args.analogy:
     analogies = {args.analogy: analogies[args.analogy]}
 
+model_kwargs = {"load_in_8bit": True, "device_map":"auto", "max_memory":{0: "24GiB", 1: "0GiB"}}
 if "bert" in args.model:
     pipe = pipeline("fill-mask", model=args.model, device=0)
 elif "llama" in args.model:
-    model_kwargs = {"load_in_8bit": True, "device_map":"auto", "max_memory":{0: "0GiB", 1: "24GiB", 2: "0GiB"}}
     pipe = pipeline("text-generation", model=args.model, model_kwargs=model_kwargs)
     # pipe.tokenizer.pad_token_id = pipe.model.config.eos_token_id
+elif "aguila" in args.model:
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    pipe = pipeline("text-generation", model=args.model, tokenizer=tokenizer, trust_remote_code=True, model_kwargs=model_kwargs)
 
 K = args.k
 def predict_k_words(analogies,K):
@@ -39,7 +42,7 @@ def predict_k_words(analogies,K):
         for prediction in pipe(questions, top_k=K*2, batch_size=8):
             predicted_words = [preprocess(p["token_str"]) for p in prediction if is_word(p["token_str"])][:K]
             predictions.append(predicted_words)
-    elif "llama" in args.model:
+    elif ("llama" in args.model) | ("aguila" in args.model):
         questions = [f"{analogy['question']}" for analogy in analogies]
         predictions = []
         for question in  tqdm(questions, leave=False):
