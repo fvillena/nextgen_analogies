@@ -27,40 +27,43 @@ if args.analogy:
 if "bert" in args.model:
     pipe = pipeline("fill-mask", model=args.model, device=0)
 elif "llama" in args.model:
-    pipe = pipeline("text-generation", model=args.model, device=0)
+    model_kwargs = {"load_in_8bit": True, "device_map":"auto", "max_memory":{0: "0GiB", 1: "24GiB", 2: "0GiB"}}
+    pipe = pipeline("text-generation", model=args.model, model_kwargs=model_kwargs)
+    # pipe.tokenizer.pad_token_id = pipe.model.config.eos_token_id
 
 K = args.k
-def predict_k_words(analogy,K):
+def predict_k_words(analogies,K):
     if "bert" in args.model:
-        predictions = pipe(f"{analogy['question']} <mask>.", top_k=K)
-        predicted_words = [preprocess(prediction["token_str"]) for prediction in predictions if is_word(prediction["token_str"])][:K]
+        questions = [f"{analogy['question']} <mask>." for analogy in analogies]
+        predictions = []
+        for prediction in pipe(questions, top_k=K*2, batch_size=8):
+            predicted_words = [preprocess(p["token_str"]) for p in prediction if is_word(p["token_str"])][:K]
+            predictions.append(predicted_words)
     elif "llama" in args.model:
-        generated_texts = pipe(
-            analogy['question'], 
-            do_sample=False,
-            return_full_text=False,
-            clean_up_tokenization_spaces=True,
-            max_new_tokens=5,
-            num_beams = K,
-            num_return_sequences = K, 
-        )
-        first_word = lambda x: x.strip().split()[0]
-        words = [first_word(x["generated_text"]) for x in generated_texts]
-        unique_words = []
-        for word in words:
-            if (not word in unique_words) & (is_word(word)):
-                unique_words.append(word)
-        predicted_words = unique_words
-    return predicted_words
+        questions = [f"{analogy['question']}" for analogy in analogies]
+        predictions = []
+        for question in  tqdm(questions, leave=False):
+            try:
+                generated_text = pipe(
+                    question, 
+                    do_sample=False,
+                    return_full_text=False,
+                    clean_up_tokenization_spaces=True,
+                    max_new_tokens=5,
+                    num_beams = K,
+                    num_return_sequences = K
+                )
+                texts = [preprocess(x["generated_text"]) for x in generated_text]
+                predictions.append(texts)
+            except IndexError:
+                print(f"error in {question}")
+                predictions.append([])
+    return predictions
 
 for rela, current_analogies in tqdm(analogies.items()):
-    for analogy in tqdm(current_analogies, leave=False):
-        i = 2
-        predicted_words = []
-        while len(predicted_words) < K:
-            predicted_words = predict_k_words(analogy, K*i)
-            i += 1
-        analogy["predicted_words"] = predicted_words
+    predicted_analogies = predict_k_words(current_analogies, K)
+    for i,analogy in enumerate(current_analogies):
+        analogy["predicted_words"] = predicted_analogies[i] 
 
 with open(args.predictions_file, "w", encoding="utf-8") as f:
     json.dump(analogies, f, indent=4, ensure_ascii=False)
