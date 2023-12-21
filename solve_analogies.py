@@ -3,6 +3,7 @@
 
 from transformers import pipeline, AutoTokenizer, StoppingCriteria, StoppingCriteriaList
 import pandas as pd
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # import defaultdict module
 import argparse
@@ -24,6 +25,13 @@ parser.add_argument(
     "-k", type=int, help="k most probable words to consider", default=20
 )
 parser.add_argument("--analogy", type=str, help="analogy to solve", default=None)
+# quantize argument
+parser.add_argument(
+    "--quantize",
+    action="store_true",
+    help="quantize model to 8-bit",
+    default=False,
+)
 args = parser.parse_args()
 
 with open(args.analogies_file, "r") as f:
@@ -33,7 +41,7 @@ if args.analogy:
     analogies = {args.analogy: analogies[args.analogy]}
 
 model_kwargs = {
-    "load_in_8bit": True,
+    "load_in_8bit": args.quantize,
     "device_map": "auto",
     # "max_memory": {0: "24GiB", 1: "0GiB"},
 }
