@@ -1,9 +1,12 @@
 #! /opt/conda/bin/python
 # -*- coding: utf-8 -*-
 
-from transformers import pipeline, AutoTokenizer, StoppingCriteria, StoppingCriteriaList
+from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import torch
+import operator
+import re
 
 # import defaultdict module
 import argparse
@@ -12,133 +15,152 @@ from tqdm import tqdm
 import json
 from nextgen_analogies import preprocess, is_word
 
-parser = argparse.ArgumentParser(description="Solve analogies using a language model.")
-parser.add_argument("--model", type=str, help="language model to use")
-parser.add_argument(
-    "--analogies_file",
-    type=Path,
-    help="path to analogies file",
-    default=Path("data/interim/analogies.json"),
-)
-parser.add_argument("--predictions_file", type=Path, help="path to predictions file")
-parser.add_argument(
-    "-k", type=int, help="k most probable words to consider", default=20
-)
-parser.add_argument("--analogy", type=str, help="analogy to solve", default=None)
-# quantize argument
-parser.add_argument(
-    "--quantize",
-    action="store_true",
-    help="quantize model to 8-bit",
-    default=False,
-)
-args = parser.parse_args()
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-with open(args.analogies_file, "r") as f:
-    analogies = json.load(f)
+dev = False
 
-if args.analogy:
-    analogies = {args.analogy: analogies[args.analogy]}
-
-model_kwargs = {
-    "load_in_8bit": args.quantize,
-    "device_map": "auto",
-    # "max_memory": {0: "24GiB", 1: "0GiB"},
-}
-if "bert" in args.model:
-    pipe = pipeline("fill-mask", model=args.model, device=0)
-elif "llama" in args.model:
-    pipe = pipeline("text-generation", model=args.model, model_kwargs=model_kwargs)
-
-    class CustomStoppingCriteria(StoppingCriteria):
-        def __init__(self):
-            self.word_delimiter_count = 0
-
-        def __call__(self, input_ids, score, **kwargs) -> bool:
-            last_token = pipe.tokenizer.convert_ids_to_tokens(input_ids[0])[-1]
-            word_delimiters = [
-                ".",
-                "?",
-                "!",
-                ".",
-                ":",
-                ";",
-                "(",
-                ")",
-                "[",
-                "]",
-                "{",
-                "}",
-                '"',
-                "'",
-                " ",
-                "\n",
-                "▁",
-                ",",
-            ]
-            for delimiter in word_delimiters:
-                if delimiter in last_token:
-                    self.word_delimiter_count += 1
-            stop = self.word_delimiter_count >= 2
-            if stop:
-                self.word_delimiter_count = 0
-            return stop
-
-    stopping_criteria = StoppingCriteriaList([CustomStoppingCriteria()])
-elif "aguila" in args.model:
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    pipe = pipeline(
-        "text-generation",
-        model=args.model,
-        tokenizer=tokenizer,
-        trust_remote_code=True,
-        model_kwargs=model_kwargs,
+if not dev:
+    parser = argparse.ArgumentParser(
+        description="Solve analogies using a language model."
     )
+    parser.add_argument("--model", type=str, help="language model to use")
+    parser.add_argument(
+        "--analogies_file",
+        type=Path,
+        help="path to analogies file",
+        default=Path("data/interim/analogies.json"),
+    )
+    parser.add_argument(
+        "--predictions_file", type=Path, help="path to predictions file"
+    )
+    parser.add_argument(
+        "-k", type=int, help="k most probable words to consider", default=20
+    )
+    parser.add_argument("--analogy", type=str, help="analogy to solve", default=None)
+    # quantize argument
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        help="quantize model to 8-bit",
+        default=False,
+    )
+    args = parser.parse_args()
 
-K = args.k
+    with open(args.analogies_file, "r") as f:
+        analogies = json.load(f)
+
+    if args.analogy:
+        analogies = {args.analogy: analogies[args.analogy]}
+
+    model_kwargs = {
+        "load_in_8bit": args.quantize,
+        "device_map": "auto",
+        # "max_memory": {0: "24GiB", 1: "0GiB"},
+    }
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model, pad_token_id=tokenizer.eos_token_id, **model_kwargs
+    )
+    K = args.k
+    predictions_file = args.predictions_file
+else:
+    model_kwargs = {
+        "load_in_8bit": False,
+        "device_map": "auto",
+    }
+    with open("data/interim/analogies_100.json", "r") as f:
+        analogies = json.load(f)
+    model_name = "PlanTL-GOB-ES/gpt2-large-bne"
+    model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    predictions_file = "PlanTL-GOB-ES--gpt2-large-bne.json"
+    K = 20
 
 
-def predict_k_words(analogies, K):
-    if "bert" in args.model:
-        questions = [f"{analogy['question']} <mask>." for analogy in analogies]
-        predictions = []
-        for prediction in pipe(questions, top_k=K * 2, batch_size=8):
-            predicted_words = [
-                preprocess(p["token_str"])
-                for p in prediction
-                if is_word(p["token_str"])
-            ][:K]
-            predictions.append(predicted_words)
-    elif ("lama" in args.model) | ("aguila" in args.model):
-        questions = [f"{analogy['question']}" for analogy in analogies]
-        predictions = []
-        for question in tqdm(questions, leave=False):
-            try:
-                generated_text = pipe(
-                    question,
-                    do_sample=False,
-                    return_full_text=False,
-                    clean_up_tokenization_spaces=True,
-                    max_new_tokens=100,
-                    stopping_criteria=stopping_criteria,
-                    num_beams=K,
-                    num_return_sequences=K,
-                    temperature=1.0,
-                    top_p=1.0,
+def predict_k_words(sentence: str, k: int, max_new_tokens: int = 10) -> list:
+    initial_sentence = sentence
+    max_new_tokens = max_new_tokens
+    num_beams = k
+
+    dict_end = {}
+    dict_aux = {initial_sentence: 1}
+
+    tokens_begin = [" ", "\n", ".", ",", '"', ";", "_", "*", "?", "!", "\xa0", "▁", "Ġ"]
+    first = True
+
+    for k in range(max_new_tokens):
+        dict_sentence = {}
+        # print(len(dict_aux))
+        for s in dict_aux:
+            encoded_text = tokenizer(s, return_tensors="pt").to(device)
+            with torch.inference_mode():
+                outputs = model(**encoded_text)
+
+            next_token_logits = outputs.logits[0, -1, :]
+            next_token_probs = torch.softmax(next_token_logits, -1)
+            topk_next_tokens = torch.topk(next_token_probs, num_beams)
+
+            l = [
+                (tokenizer.decode(idx), float(prob.numpy()))
+                for idx, prob in zip(
+                    topk_next_tokens.indices.cpu(), topk_next_tokens.values.cpu()
                 )
-                texts = [preprocess(x["generated_text"]) for x in generated_text]
-                predictions.append(texts)
-            except IndexError:
-                print(f"error in {question}")
-                predictions.append([])
-    return predictions
+            ]
+            l_end = [e for e in l if e[0][0] in tokens_begin]
+            l_subword = [e for e in l if e[0][0] not in tokens_begin]
+
+            if first:
+                for e in l:
+                    dict_sentence[s + e[0]] = (
+                        dict_aux[s] * e[1]
+                    )  # *(l_end[0][1])#*((p_mean)**(max_new_tokens-k-1)) # revisar
+
+            else:
+                for e in l_subword:
+                    dict_sentence[s + e[0]] = (
+                        dict_aux[s] * e[1]
+                    )  # si hay un token que no tiene espacio seguir con beam search
+
+                if l_end != []:
+                    sum_p = sum([e[1] for e in l_end])
+                    dict_end[s + tokenizer.eos_token] = (
+                        dict_aux[s] * sum_p
+                    )  # *(l_end[0][1])#*((p_mean)**(max_new_tokens-k-1)) # revisar
+
+        aux = dict(
+            sorted(dict_sentence.items(), key=operator.itemgetter(1), reverse=True)
+        )
+        sdict = {A: N for (A, N) in [x for x in aux.items()][:num_beams]}
+        dict_aux = sdict
+        first = False
+
+    for key, val in dict.items(dict_aux):
+        dict_end[key] = val
+
+    aux = dict(sorted(dict_end.items(), key=operator.itemgetter(1), reverse=True))
+    words = []
+    for s in aux.keys():
+        if len(words) == num_beams:
+            break
+        try:
+            word = re.search(r".* (\w+)(<\|endoftext\|>)?", s).group(1)
+            words.append(word)
+        except:
+            pass
+    return words
+    # este metodo da mas probabilidad a palabras con pocos tokenes pero igual no es tan malo
 
 
 for rela, current_analogies in tqdm(analogies.items()):
     print(f"predicting {rela}")
-    predicted_analogies = predict_k_words(current_analogies, K)
-    for i, analogy in enumerate(current_analogies):
-        analogy["predicted_words"] = predicted_analogies[i]
+    for current_analogy in tqdm(current_analogies):
+        try:
+            current_analogy["predicted_words"] = predict_k_words(
+                current_analogy["question"], K
+            )
+        except Exception as e:
+            print(f"Exception in {current_analogy['question']}: {e}")
+            current_analogy["predicted_words"] = []
 
-with open(args.predictions_file, "w", encoding="utf-8") as f:
+with open(predictions_file, "w", encoding="utf-8") as f:
     json.dump(analogies, f, indent=4, ensure_ascii=False)
