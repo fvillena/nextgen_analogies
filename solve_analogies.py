@@ -67,6 +67,7 @@ if not dev:
         model = AutoModelForCausalLM.from_pretrained(
             args.model, pad_token_id=tokenizer.eos_token_id, **model_kwargs
         )
+    model_name = args.model
     K = args.k
     predictions_file = args.predictions_file
 else:
