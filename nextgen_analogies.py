@@ -1,5 +1,6 @@
 import string
 
+
 def preprocess(sentence):
     return sentence.strip().lower()
 
@@ -11,7 +12,7 @@ def is_word(word):
 def is_in(true_word, predicted_words):
     result = False
     for word in predicted_words:
-        if true_word in word:
+        if true_word == word:
             result = True
             break
     return result
