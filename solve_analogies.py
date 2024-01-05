@@ -58,9 +58,15 @@ if not dev:
         # "max_memory": {0: "24GiB", 1: "0GiB"},
     }
     tokenizer = AutoTokenizer.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model, pad_token_id=tokenizer.eos_token_id, **model_kwargs
-    )
+    if "biogpt" in args.model.lower():
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model, pad_token_id=tokenizer.eos_token_id
+        )
+        model.cuda()
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model, pad_token_id=tokenizer.eos_token_id, **model_kwargs
+        )
     K = args.k
     predictions_file = args.predictions_file
 else:
@@ -68,16 +74,25 @@ else:
         "load_in_8bit": False,
         "device_map": "auto",
     }
-    with open("data/interim/analogies_100.json", "r") as f:
+    with open("data/interim/analogies_100.en.json", "r") as f:
         analogies = json.load(f)
-    model_name = "PlanTL-GOB-ES/gpt2-large-bne"
-    model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+    model_name = "stanford-crfm/BioMedLM"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    predictions_file = "PlanTL-GOB-ES--gpt2-large-bne.json"
+    if "biogpt" in model_name.lower():
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name, pad_token_id=tokenizer.eos_token_id
+        )
+        model.cuda()
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name, pad_token_id=tokenizer.eos_token_id, **model_kwargs
+        )
+
+    predictions_file = "stanford-crfm--BioMedLM.json"
     K = 20
 
 
-def predict_k_words(sentence: str, k: int, max_new_tokens: int = 10) -> list:
+def predict_k_words_gpt(sentence: str, k: int, max_new_tokens: int = 10) -> list:
     initial_sentence = sentence
     max_new_tokens = max_new_tokens
     num_beams = k
@@ -90,7 +105,6 @@ def predict_k_words(sentence: str, k: int, max_new_tokens: int = 10) -> list:
 
     for k in range(max_new_tokens):
         dict_sentence = {}
-        # print(len(dict_aux))
         for s in dict_aux:
             encoded_text = tokenizer(s, return_tensors="pt").to(device)
             with torch.inference_mode():
@@ -151,16 +165,22 @@ def predict_k_words(sentence: str, k: int, max_new_tokens: int = 10) -> list:
     # este metodo da mas probabilidad a palabras con pocos tokenes pero igual no es tan malo
 
 
+def predict_k_words_biogpt(sentence: str, k: int, max_new_tokens: int = 10) -> list:
+    words = predict_k_words_gpt(sentence, k, max_new_tokens)
+    return [word[2:] for word in words]
+
+
 for rela, current_analogies in tqdm(analogies.items()):
     print(f"predicting {rela}")
     for current_analogy in tqdm(current_analogies):
-        try:
-            current_analogy["predicted_words"] = predict_k_words(
+        if "biogpt" in model_name.lower():
+            current_analogy["predicted_words"] = predict_k_words_biogpt(
                 current_analogy["question"], K
             )
-        except Exception as e:
-            print(f"Exception in {current_analogy['question']}: {e}")
-            current_analogy["predicted_words"] = []
+        else:
+            current_analogy["predicted_words"] = predict_k_words_gpt(
+                current_analogy["question"], K
+            )
 
 with open(predictions_file, "w", encoding="utf-8") as f:
     json.dump(analogies, f, indent=4, ensure_ascii=False)
