@@ -15,7 +15,7 @@ from tqdm import tqdm
 import json
 from nextgen_analogies import preprocess, is_word
 
-dev = True
+dev = False
 
 if not dev:
     parser = argparse.ArgumentParser(
@@ -232,7 +232,8 @@ def predict_k_words_llama(sentence: str, k: int, max_new_tokens: int = 10) -> li
             break
         try:
             word = re.search(r".* (\w+)", s).group(1)
-            words.append(word)
+            if word != "to":
+                words.append(word)
         except:
             pass
     return words
