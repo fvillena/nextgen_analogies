@@ -15,8 +15,6 @@ from tqdm import tqdm
 import json
 from nextgen_analogies import preprocess, is_word
 
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
 dev = True
 
 if not dev:
@@ -107,7 +105,7 @@ def predict_k_words_gpt(sentence: str, k: int, max_new_tokens: int = 10) -> list
     for k in range(max_new_tokens):
         dict_sentence = {}
         for s in dict_aux:
-            encoded_text = tokenizer(s, return_tensors="pt").to(device)
+            encoded_text = tokenizer(s, return_tensors="pt")
             with torch.inference_mode():
                 outputs = model(**encoded_text)
 
@@ -182,7 +180,7 @@ def predict_k_words_llama(sentence: str, k: int, max_new_tokens: int = 10) -> li
     for k in range(max_new_tokens):
         dict_sentence = {}
         for s in dict_aux:
-            encoded_text = tokenizer(s, return_tensors="pt").to(device)
+            encoded_text = tokenizer(s, return_tensors="pt")
             with torch.inference_mode():
                 outputs = model(**encoded_text)
 
