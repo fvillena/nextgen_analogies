@@ -17,7 +17,7 @@ from nextgen_analogies import preprocess, is_word
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-dev = False
+dev = True
 
 if not dev:
     parser = argparse.ArgumentParser(
@@ -72,12 +72,12 @@ if not dev:
     predictions_file = args.predictions_file
 else:
     model_kwargs = {
-        "load_in_8bit": False,
+        "load_in_8bit": True,
         "device_map": "auto",
     }
     with open("data/interim/analogies_100.en.json", "r") as f:
         analogies = json.load(f)
-    model_name = "stanford-crfm/BioMedLM"
+    model_name = "meta-llama/Llama-2-7b-hf"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     if "biogpt" in model_name.lower():
         model = AutoModelForCausalLM.from_pretrained(
@@ -89,7 +89,7 @@ else:
             model_name, pad_token_id=tokenizer.eos_token_id, **model_kwargs
         )
 
-    predictions_file = "stanford-crfm--BioMedLM.json"
+    predictions_file = "meta-llama--Llama-2-7b-hf.json"
     K = 20
 
 
@@ -163,19 +163,91 @@ def predict_k_words_gpt(sentence: str, k: int, max_new_tokens: int = 10) -> list
         except:
             pass
     return words
-    # este metodo da mas probabilidad a palabras con pocos tokenes pero igual no es tan malo
-
 
 def predict_k_words_biogpt(sentence: str, k: int, max_new_tokens: int = 10) -> list:
     words = predict_k_words_gpt(sentence, k, max_new_tokens)
     return [word[2:] for word in words]
 
+def predict_k_words_llama(sentence: str, k: int, max_new_tokens: int = 10) -> list:
+    initial_sentence = sentence
+    max_new_tokens = max_new_tokens
+    num_beams = k
+
+    dict_end = {}
+    dict_aux = {initial_sentence: 1}
+
+    tokens_begin = [" ", "\n", ".", ",", '"', ";", "_", "*", "?", "!", "\xa0", "▁", "Ġ"]
+    first = True
+
+    for k in range(max_new_tokens):
+        dict_sentence = {}
+        for s in dict_aux:
+            encoded_text = tokenizer(s, return_tensors="pt").to(device)
+            with torch.inference_mode():
+                outputs = model(**encoded_text)
+
+            next_token_logits = outputs.logits[0, -1, :]
+            next_token_probs = torch.softmax(next_token_logits, -1)
+            topk_next_tokens = torch.topk(next_token_probs, num_beams)
+
+            l = [
+                (token.replace("▁"," "), float(prob.numpy()))
+                for token, prob in zip(
+                    tokenizer.convert_ids_to_tokens(topk_next_tokens.indices), topk_next_tokens.values.cpu()
+                )
+            ]
+            l_end = [e for e in l if e[0][0] in tokens_begin]
+            l_subword = [e for e in l if e[0][0] not in tokens_begin]
+
+            if first:
+                for e in l:
+                    dict_sentence[s + e[0]] = (
+                        dict_aux[s] * e[1]
+                    )  # *(l_end[0][1])#*((p_mean)**(max_new_tokens-k-1)) # revisar
+
+            else:
+                for e in l_subword:
+                    dict_sentence[s + e[0]] = (
+                        dict_aux[s] * e[1]
+                    )  # si hay un token que no tiene espacio seguir con beam search
+
+                if l_end != []:
+                    sum_p = sum([e[1] for e in l_end])
+                    dict_end[s + tokenizer.eos_token] = (
+                        dict_aux[s] * sum_p
+                    )  # *(l_end[0][1])#*((p_mean)**(max_new_tokens-k-1)) # revisar
+
+        aux = dict(
+            sorted(dict_sentence.items(), key=operator.itemgetter(1), reverse=True)
+        )
+        sdict = {A: N for (A, N) in [x for x in aux.items()][:num_beams]}
+        dict_aux = sdict
+        first = False
+
+    for key, val in dict.items(dict_aux):
+        dict_end[key] = val
+
+    aux = dict(sorted(dict_end.items(), key=operator.itemgetter(1), reverse=True))
+    words = []
+    for s in aux.keys():
+        if len(words) == num_beams:
+            break
+        try:
+            word = re.search(r".* (\w+)", s).group(1)
+            words.append(word)
+        except:
+            pass
+    return words
 
 for rela, current_analogies in tqdm(analogies.items()):
     print(f"predicting {rela}")
     for current_analogy in tqdm(current_analogies):
         if "biogpt" in model_name.lower():
             current_analogy["predicted_words"] = predict_k_words_biogpt(
+                current_analogy["question"], K
+            )
+        elif "llama" in model_name.lower():
+            current_analogy["predicted_words"] = predict_k_words_llama(
                 current_analogy["question"], K
             )
         else:
