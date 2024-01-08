@@ -75,7 +75,7 @@ else:
     }
     with open("data/interim/analogies_100.en.json", "r") as f:
         analogies = json.load(f)
-    model_name = "meta-llama/Llama-2-7b-hf"
+    model_name = "epfl-llm/meditron-7b"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     if "biogpt" in model_name.lower():
         model = AutoModelForCausalLM.from_pretrained(
@@ -87,7 +87,7 @@ else:
             model_name, pad_token_id=tokenizer.eos_token_id, **model_kwargs
         )
 
-    predictions_file = "meta-llama--Llama-2-7b-hf.json"
+    predictions_file = "epfl-llm--meditron-7b.json"
     K = 20
 
 
@@ -249,7 +249,7 @@ for rela, current_analogies in tqdm(analogies.items()):
             current_analogy["predicted_words"] = predict_k_words_biogpt(
                 current_analogy["question"], K
             )
-        elif "llama" in model_name.lower():
+        elif ("llama" in model_name.lower()) | ("meditron" in model_name.lower()):
             current_analogy["predicted_words"] = predict_k_words_llama(
                 current_analogy["question"], K
             )
