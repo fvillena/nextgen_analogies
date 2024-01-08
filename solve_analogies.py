@@ -105,7 +105,7 @@ def predict_k_words_gpt(sentence: str, k: int, max_new_tokens: int = 10) -> list
     for k in range(max_new_tokens):
         dict_sentence = {}
         for s in dict_aux:
-            encoded_text = tokenizer(s, return_tensors="pt")
+            encoded_text = tokenizer(s, return_tensors="pt").to("cuda")
             with torch.inference_mode():
                 outputs = model(**encoded_text)
 
@@ -162,9 +162,11 @@ def predict_k_words_gpt(sentence: str, k: int, max_new_tokens: int = 10) -> list
             pass
     return words
 
+
 def predict_k_words_biogpt(sentence: str, k: int, max_new_tokens: int = 10) -> list:
     words = predict_k_words_gpt(sentence, k, max_new_tokens)
     return [word[2:] for word in words]
+
 
 def predict_k_words_llama(sentence: str, k: int, max_new_tokens: int = 10) -> list:
     initial_sentence = sentence
@@ -180,7 +182,7 @@ def predict_k_words_llama(sentence: str, k: int, max_new_tokens: int = 10) -> li
     for k in range(max_new_tokens):
         dict_sentence = {}
         for s in dict_aux:
-            encoded_text = tokenizer(s, return_tensors="pt")
+            encoded_text = tokenizer(s, return_tensors="pt").to("cuda")
             with torch.inference_mode():
                 outputs = model(**encoded_text)
 
@@ -189,9 +191,10 @@ def predict_k_words_llama(sentence: str, k: int, max_new_tokens: int = 10) -> li
             topk_next_tokens = torch.topk(next_token_probs, num_beams)
 
             l = [
-                (token.replace("▁"," "), float(prob.numpy()))
+                (token.replace("▁", " "), float(prob.numpy()))
                 for token, prob in zip(
-                    tokenizer.convert_ids_to_tokens(topk_next_tokens.indices), topk_next_tokens.values.cpu()
+                    tokenizer.convert_ids_to_tokens(topk_next_tokens.indices),
+                    topk_next_tokens.values.cpu(),
                 )
             ]
             l_end = [e for e in l if e[0][0] in tokens_begin]
@@ -237,6 +240,7 @@ def predict_k_words_llama(sentence: str, k: int, max_new_tokens: int = 10) -> li
         except:
             pass
     return words
+
 
 for rela, current_analogies in tqdm(analogies.items()):
     print(f"predicting {rela}")
