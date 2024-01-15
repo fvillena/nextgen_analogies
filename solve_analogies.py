@@ -42,6 +42,7 @@ if not dev:
         help="quantize model to 8-bit",
         default=False,
     )
+    parser.add_argument("--few_shot", type=int, help="few shot", default=0)
     args = parser.parse_args()
 
     with open(args.analogies_file, "r") as f:
@@ -68,6 +69,7 @@ if not dev:
     model_name = args.model
     K = args.k
     predictions_file = args.predictions_file
+    few_shot = args.few_shot
 else:
     model_kwargs = {
         "load_in_8bit": True,
@@ -75,7 +77,7 @@ else:
     }
     with open("data/interim/analogies_100.en.json", "r") as f:
         analogies = json.load(f)
-    model_name = "epfl-llm/meditron-7b"
+    model_name = "microsoft/biogpt"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     if "biogpt" in model_name.lower():
         model = AutoModelForCausalLM.from_pretrained(
@@ -87,8 +89,9 @@ else:
             model_name, pad_token_id=tokenizer.eos_token_id, **model_kwargs
         )
 
-    predictions_file = "epfl-llm--meditron-7b.json"
+    predictions_file = "microsoft--biogpt.json"
     K = 20
+    few_shot = 0
 
 
 def predict_k_words_gpt(sentence: str, k: int, max_new_tokens: int = 10) -> list:
@@ -242,21 +245,36 @@ def predict_k_words_llama(sentence: str, k: int, max_new_tokens: int = 10) -> li
     return words
 
 
+def get_k_shot_sentence(analogies, current_analogy, shots):
+    sentence = ""
+    i = 0
+    answers = set()
+    for analogy in analogies:
+        if analogy["question"] == current_analogy["question"]:
+            continue
+        if i == shots:
+            break
+        if analogy["answer"] in answers:
+            continue
+        sentence += f'{analogy["question"]} {analogy["answer"]}, '
+        answers.add(analogy["answer"])
+        i += 1
+    return f"{sentence}{current_analogy['question']}"
+
+
 for rela, current_analogies in tqdm(analogies.items()):
     print(f"predicting {rela}")
     for current_analogy in tqdm(current_analogies):
-        if "biogpt" in model_name.lower():
-            current_analogy["predicted_words"] = predict_k_words_biogpt(
-                current_analogy["question"], K
-            )
-        elif ("llama" in model_name.lower()) | ("meditron" in model_name.lower()):
-            current_analogy["predicted_words"] = predict_k_words_llama(
-                current_analogy["question"], K
-            )
+        if few_shot > 0:
+            sentence = get_k_shot_sentence(current_analogies, current_analogy, few_shot)
         else:
-            current_analogy["predicted_words"] = predict_k_words_gpt(
-                current_analogy["question"], K
-            )
+            sentence = current_analogy["question"]
+        if "biogpt" in model_name.lower():
+            current_analogy["predicted_words"] = predict_k_words_biogpt(sentence, K)
+        elif ("llama" in model_name.lower()) | ("meditron" in model_name.lower()):
+            current_analogy["predicted_words"] = predict_k_words_llama(sentence, K)
+        else:
+            current_analogy["predicted_words"] = predict_k_words_gpt(sentence, K)
 
 with open(predictions_file, "w", encoding="utf-8") as f:
     json.dump(analogies, f, indent=4, ensure_ascii=False)
