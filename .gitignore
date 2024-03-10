@@ -1,10 +1,11 @@
 data/raw/*
 !data/raw/.gitkeep
-data/interim/*
+data/interim*/*
 !data/interim/.gitkeep
-models/predictions/*
+models/predictions*/*
 !models/predictions/.gitkeep
-reports/*
+reports*/*
 !reports/.gitkeep
 __pycache__
 venv
+notebooks*
