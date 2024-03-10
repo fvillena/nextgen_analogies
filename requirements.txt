@@ -8,3 +8,4 @@ matplotlib
 xformers
 bitsandbytes
 einops
+scipy
