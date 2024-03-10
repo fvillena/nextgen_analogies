@@ -8,11 +8,12 @@ SELECT
 	AUI2,
 	c2.STR
 FROM
+	-- Change the schema name to the one you are using, in this case, the schema is called umls.
 	umls.MRREL
 LEFT JOIN umls.MRCONSO c1 ON
 	umls.MRREL.AUI1 = c1.AUI
 LEFT JOIN umls.MRCONSO c2 ON
 	umls.MRREL.AUI2 = c2.AUI
 WHERE
-	RELA IN ("causative_agent_of", "has_occurrence", "cause_of", "direct_device_of", "focus_of", "finding_method_of", "associated_finding_of", "has_modification")
+	RELA IN ("finding_method_of", "associated_with", "has_causative_agent")
 	AND c2.STR NOT LIKE "% %";
