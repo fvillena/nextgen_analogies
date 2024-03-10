@@ -1,6 +1,8 @@
 #! /opt/conda/bin/python
 # -*- coding: utf-8 -*-
 
+""""Build analogies from relations file. Run python build_analogies.py --help for help."""
+
 import pandas as pd
 import argparse
 from nextgen_analogies import preprocess
