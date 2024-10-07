@@ -269,7 +269,7 @@ for rela, current_analogies in tqdm(analogies.items()):
             sentence = get_k_shot_sentence(current_analogies, current_analogy, few_shot)
         else:
             sentence = current_analogy["question"]
-        if ("biogpt" in model_name.lower()) | ("biomistral" in model_name.lower()):
+        if ("biogpt" in model_name.lower()) | ("mistral" in model_name.lower()):
             current_analogy["predicted_words"] = predict_k_words_biogpt(sentence, K)
         elif ("llama" in model_name.lower()) | ("meditron" in model_name.lower()):
             current_analogy["predicted_words"] = predict_k_words_llama(sentence, K)
