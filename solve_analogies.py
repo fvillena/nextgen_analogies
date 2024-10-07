@@ -122,8 +122,8 @@ def predict_k_words_gpt(sentence: str, k: int, max_new_tokens: int = 10) -> list
                     topk_next_tokens.indices.cpu(), topk_next_tokens.values.cpu()
                 )
             ]
-            l_end = [e for e in l if e[0][0] in tokens_begin]
-            l_subword = [e for e in l if e[0][0] not in tokens_begin]
+            l_end = [e for e in l if ((e[0] == "") or (e[0][0] in tokens_begin))]
+            l_subword = [e for e in l if ((e[0] != "") and (e[0][0] not in tokens_begin))]
 
             if first:
                 for e in l:
@@ -269,7 +269,7 @@ for rela, current_analogies in tqdm(analogies.items()):
             sentence = get_k_shot_sentence(current_analogies, current_analogy, few_shot)
         else:
             sentence = current_analogy["question"]
-        if "biogpt" in model_name.lower():
+        if ("biogpt" in model_name.lower()) | ("biomistral" in model_name.lower()):
             current_analogy["predicted_words"] = predict_k_words_biogpt(sentence, K)
         elif ("llama" in model_name.lower()) | ("meditron" in model_name.lower()):
             current_analogy["predicted_words"] = predict_k_words_llama(sentence, K)
